@@ -2,37 +2,36 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log("chatPersist.js: DOM fully loaded.");
 
   if (typeof jQuery === 'undefined') {
-    console.error("chatPersist.js: jQuery is required but not found. Script will not run.");
+    console.error("chatPersist.js: jQuery is required but not found.");
     return;
   }
 
   jQuery(document).ready(function($) {
     const popupId = 12698;
-    const MAX_RETRIES = 20; // Reduced retries for efficiency
-    const CHAT_RETRIES = 20; // Chat container retries
+    const MAX_RETRIES = 20;
 
-    // Utility to wait for an element with a timeout
-    function waitForElement(selector, callback, maxAttempts = MAX_RETRIES, attempt = 0) {
+    // Wait for element with streamlined retries
+    function waitForElement(selector, callback, retries = MAX_RETRIES) {
       const $element = $(selector);
       if ($element.length) {
         callback($element);
-      } else if (attempt < maxAttempts) {
-        setTimeout(() => waitForElement(selector, callback, maxAttempts, attempt + 1), 100);
+      } else if (retries > 0) {
+        setTimeout(() => waitForElement(selector, callback, retries - 1), 100);
       } else {
-        console.error(`chatPersist.js: Element ${selector} not found after ${maxAttempts} retries.`);
+        console.error(`chatPersist.js: ${selector} not found after ${MAX_RETRIES} retries.`);
       }
     }
 
-    // Show the popup with robust fallback
+    // Show popup with robust fallback
     function showPopup() {
-      const $popup = $(`[data-elementor-id="${popupId}"]`);
+      const popupSelector = `[data-elementor-id="${popupId}"]`;
       let popupShown = false;
 
-      // Try Elementor Pro first
       if (typeof elementorProFrontend?.modules?.popup?.showPopup === 'function') {
         try {
-          console.log("chatPersist.js: Attempting to show popup with Elementor Pro...");
+          console.log("chatPersist.js: Attempting Elementor Pro popup...");
           elementorProFrontend.modules.popup.showPopup({ id: popupId });
+          const $popup = $(popupSelector);
           popupShown = $popup.length && $popup.is(':visible');
           if (popupShown) console.log("chatPersist.js: Popup shown via Elementor Pro.");
         } catch (error) {
@@ -40,16 +39,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // Fallback to jQuery if Elementor fails or popup isn’t visible
       if (!popupShown) {
-        waitForElement(`[data-elementor-id="${popupId}"]`, ($popup) => {
+        waitForElement(popupSelector, ($popup) => {
           $popup.show().addClass('elementor-popup-modal--active dialog-visible');
-          if ($popup.is(':visible')) {
-            console.log("chatPersist.js: Popup shown via jQuery fallback.");
-            popupShown = true;
-          } else {
-            console.error("chatPersist.js: Popup element found but not visible after jQuery attempt.");
-          }
+          popupShown = $popup.is(':visible');
+          if (popupShown) console.log("chatPersist.js: Popup shown via jQuery fallback.");
           finalizePopup(popupShown);
         });
       } else {
@@ -57,42 +51,42 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Finalize popup state and reinitialize chat
+    // Finalize popup state
     function finalizePopup(popupShown) {
       if (popupShown) {
         sessionStorage.setItem('chatPopupActive', 'true');
+        console.log("chatPersist.js: Popup active, session tagged.");
         reinitializeChat();
       }
     }
 
-    // Reinitialize chat with retry logic
-    function reinitializeChat(retryAttempt = 0) {
+    // Reinitialize chat
+    function reinitializeChat(retries = MAX_RETRIES) {
       waitForElement('#chat-container', ($chatContainer) => {
         if ($chatContainer.is(':visible')) {
-          const event = new CustomEvent('chatReinitialize');
-          document.dispatchEvent(event);
+          document.dispatchEvent(new CustomEvent('chatReinitialize'));
           console.log("chatPersist.js: Chat reinitialized.");
-        } else if (retryAttempt < CHAT_RETRIES) {
-          console.warn(`chatPersist.js: Chat container not visible, retrying (${retryAttempt + 1}/${CHAT_RETRIES})...`);
-          setTimeout(() => reinitializeChat(retryAttempt + 1), 100);
+        } else if (retries > 0) {
+          console.warn(`chatPersist.js: #chat-container not visible, retrying (${MAX_RETRIES - retries + 1}/${MAX_RETRIES})...`);
+          setTimeout(() => reinitializeChat(retries - 1), 100);
         } else {
-          console.error("chatPersist.js: Chat container not visible after retries.");
+          console.error("chatPersist.js: #chat-container not visible after retries.");
         }
-      }, CHAT_RETRIES, retryAttempt);
+      }, retries);
     }
 
-    // Open popup and set session tag
+    // Open popup
     function openPopup() {
       console.log("chatPersist.js: Opening popup...");
       showPopup();
     }
 
-    // Close popup and clear session tag
+    // Close popup
     function closePopup() {
       const $popup = $(`[data-elementor-id="${popupId}"]`);
       if ($popup.length) {
         $popup.hide().removeClass('elementor-popup-modal--active dialog-visible');
-        console.log("chatPersist.js: Popup closed via jQuery.");
+        console.log("chatPersist.js: Popup closed.");
       }
       sessionStorage.removeItem('chatPopupActive');
       if (window.location.hash === '#cloudie') {
@@ -101,27 +95,25 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Simulate #cloudie on page load if tagged
-    function checkPopupOnLoad() {
+    // Check popup state on load
+    function checkPopupState() {
       if (sessionStorage.getItem('chatPopupActive') === 'true') {
-        console.log("chatPersist.js: Chat popup tagged as active, simulating #cloudie...");
+        console.log("chatPersist.js: Chat popup active, ensuring #cloudie...");
         if (window.location.hash !== '#cloudie') {
           window.location.hash = '#cloudie';
         } else {
-          openPopup(); // Direct trigger if hash already present
+          openPopup();
         }
       }
     }
 
-    // Event listeners
+    // Setup event listeners
     function setupListeners() {
-      // Open popup on #cloudie links
       $('a[href="#cloudie"]').on('click.cloudie', (e) => {
         e.preventDefault();
         openPopup();
       });
 
-      // Close popup on Elementor hide event
       $(document).on('elementor/popup/hide.cloudie', (event, id) => {
         if (id === popupId) {
           console.log("chatPersist.js: Elementor popup hide detected.");
@@ -129,7 +121,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      // Navigation: append #cloudie if popup active
       $('a:not([href="#cloudie"]):not([href^="javascript"])').on('click.cloudie', (e) => {
         const href = e.currentTarget.href;
         if (sessionStorage.getItem('chatPopupActive') === 'true' && href && !href.includes('#')) {
@@ -139,10 +130,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      // Hash change triggers popup
       $(window).on('hashchange.cloudie', () => {
         if (window.location.hash === '#cloudie' && sessionStorage.getItem('chatPopupActive') === 'true') {
-          console.log("chatPersist.js: Hashchange to #cloudie detected, opening popup...");
+          console.log("chatPersist.js: Hashchange to #cloudie, opening popup...");
           openPopup();
         }
       });
@@ -151,10 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize
     console.log("chatPersist.js: Starting initialization...");
     setupListeners();
-    checkPopupOnLoad(); // Check immediately on load
-    $(document).on('DOMContentLoaded elementor/loaded', () => {
-      console.log("chatPersist.js: Page fully loaded, rechecking popup state...");
-      checkPopupOnLoad();
+    checkPopupState();
+    $(document).on('elementor/loaded', () => {
+      console.log("chatPersist.js: Elementor loaded, rechecking popup state...");
+      checkPopupState();
     });
     console.log("chatPersist.js: Initialization complete.");
   });

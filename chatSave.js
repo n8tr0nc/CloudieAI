@@ -1,117 +1,136 @@
-document.addEventListener('DOMContentLoaded', () => {
-  console.log("chatSave.js: DOM fully loaded.");
+// chatSave.js
+(() => {
+  "use strict";
 
-  // Debounce utility to prevent rapid repeated saves
+  // Constants
+  const CHAT_LOG_ID = "chat-log";
+  const SAVE_BUTTON_ID = "saveChat";
+  const POPUP_ID = "12698"; // Match chatMain.js Elementor popup ID
+  const DEBOUNCE_DELAY = 300; // ms
+  const FILE_PREFIX = "cloudie-chat";
+
+  // Debounce utility
   function debounce(func, wait) {
     let timeout;
-    return function (...args) {
+    return (...args) => {
       clearTimeout(timeout);
-      timeout = setTimeout(() => func.apply(this, args), wait);
+      timeout = setTimeout(() => func(...args), wait);
     };
   }
 
-  // Save chat transcript to a file
-  function saveChatToFile() {
-    const chatLog = document.getElementById('chat-log');
+  // Format timestamp for filename and header
+  function getTimestamp() {
+    const now = new Date();
+    const pad = (num) => String(num).padStart(2, "0");
+    const dateStr = `${pad(now.getMonth() + 1)}${pad(now.getDate())}${now.getFullYear()}`;
+    const timeStr = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    return { dateStr, timeStr, fullDate: `${pad(now.getMonth() + 1)}/${pad(now.getDate())}/${now.getFullYear()}`, fullTime: now.toTimeString().split(" ")[0] };
+  }
+
+  // Generate chat transcript text
+  function generateTranscript() {
+    const chatLog = document.getElementById(CHAT_LOG_ID);
     if (!chatLog) {
-      console.warn("chatSave.js: Chat log (#chat-log) not found.");
-      return;
+      console.warn("chatSave.js: Chat log not found.");
+      return null;
     }
 
-    try {
-      const now = new Date();
-      const month = ('0' + (now.getMonth() + 1)).slice(-2);
-      const day = ('0' + now.getDate()).slice(-2);
-      const year = now.getFullYear();
-      const dateStr = month + day + year;
-      const hours = ('0' + now.getHours()).slice(-2);
-      const minutes = ('0' + now.getMinutes()).slice(-2);
-      const seconds = ('0' + now.getSeconds()).slice(-2);
-      const timeStr = hours + minutes + seconds;
-
-      const header = 
+    const { dateStr, timeStr, fullDate, fullTime } = getTimestamp();
+    const header = 
 `Cloudie Chat Transcript
-Date: ${month}/${day}/${year}
-Time: ${now.toTimeString().split(' ')[0]}
-Session ID: ${dateStr}-${timeStr}\n
+Date: ${fullDate}
+Time: ${fullTime}
+Session ID: ${dateStr}-${timeStr}
 Legal: Informational only. Not legal advice. Data processed as per our Privacy Policy. Content is confidential and non-binding. Use implies acceptance of our Terms & Conditions. All rights reserved.
 
 `;
 
-      let text = header;
-      const wrappers = document.querySelectorAll('#chat-log .chat-text');
-      if (wrappers.length === 0) {
-        text += "No chat messages available.\n";
-      } else {
-        wrappers.forEach(wrapper => {
-          const bubble = wrapper.querySelector('div');
-          if (bubble) {
-            const senderTag = bubble.classList.contains('user-text') ? "User: " : "Cloudie: ";
-            text += senderTag + bubble.innerText + "\n\n";
-          }
-        });
-      }
+    const wrappers = chatLog.querySelectorAll(".chat-text");
+    let text = header;
+    if (wrappers.length === 0) {
+      text += "No chat messages available.\n";
+    } else {
+      wrappers.forEach((wrapper) => {
+        const bubble = wrapper.querySelector("div");
+        if (bubble) {
+          const senderTag = bubble.classList.contains("user-text") ? "User: " : "Cloudie: ";
+          text += `${senderTag}${bubble.textContent.trim()}\n\n`;
+        }
+      });
+    }
+    return { text, fileName: `${FILE_PREFIX}-${dateStr}-${timeStr}.txt` };
+  }
 
-      const blob = new Blob([text], { type: "text/plain" });
-      const url = window.URL.createObjectURL(blob);
-      const fileName = `cloudie-chat-${dateStr}-${timeStr}.txt`;
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
+  // Save chat to file
+  function saveChatToFile() {
+    try {
+      const transcript = generateTranscript();
+      if (!transcript) return;
 
-      // Use requestAnimationFrame for DOM manipulation
+      const { text, fileName } = transcript;
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+
       requestAnimationFrame(() => {
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        console.log("chatSave.js: Chat transcript saved as", fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        console.log("chatSave.js: Saving chat transcript as", fileName);
       });
     } catch (error) {
       console.error("chatSave.js: Error saving chat transcript:", error);
     }
   }
 
-  // Debounced save function
-  const debouncedSaveChatToFile = debounce(saveChatToFile, 300); // 300ms debounce
-
-  // Attach listener to save button
-  function attachSaveListener() {
-    const saveChatButton = document.getElementById('saveChat');
-    if (!saveChatButton) {
-      console.warn("chatSave.js: Save button (#saveChat) not found.");
-      return false;
+  // Initialize save functionality
+  function initSaveChat() {
+    const saveButton = document.getElementById(SAVE_BUTTON_ID);
+    if (!saveButton) {
+      console.warn("chatSave.js: Save button (#saveChat) not found in DOM.");
+      return;
     }
 
-    if (saveChatButton.dataset.listenerAttached === "true") {
+    if (saveButton.dataset.listenerAttached === "true") {
       console.log("chatSave.js: Save button listener already attached.");
-      return true;
+      return;
     }
 
-    saveChatButton.addEventListener('click', (e) => {
+    const debouncedSaveChat = debounce(saveChatToFile, DEBOUNCE_DELAY);
+    saveButton.addEventListener("click", (e) => {
       e.preventDefault();
-      debouncedSaveChatToFile();
+      debouncedSaveChat();
     });
-    saveChatButton.dataset.listenerAttached = "true";
-    console.log("chatSave.js: Save button listener attached.");
-    return true;
+    saveButton.dataset.listenerAttached = "true";
+    console.log("chatSave.js: Save button listener active...");
   }
 
-  // Initialize with MutationObserver
-  const observer = new MutationObserver((mutations, obs) => {
-    const chatContainer = document.getElementById('chat-container');
-    if (chatContainer && chatContainer.offsetParent !== null) {
-      if (attachSaveListener()) {
-        obs.disconnect(); // Stop observing after listener is attached
-        console.log("chatSave.js: Observer disconnected after initialization.");
+  // Setup triggers
+  document.addEventListener("DOMContentLoaded", () => {
+    // Elementor popup show event
+    document.addEventListener("elementor/popup/show", (event) => {
+      const { popupId } = event.detail || {};
+      if (popupId === POPUP_ID) {
+        console.log("chatSave.js: Elementor popup shown, initializing save functionality...");
+        setTimeout(() => initSaveChat(), 300); // Match delay from chatMain.js
       }
-    }
-  });
+    });
 
-  observer.observe(document.body, { childList: true, subtree: true });
-	
-	document.addEventListener('chatReinitialize', () => {
-		console.log("chatSave.js: Reattaching listener due to popup reopen.");
-		attachSaveListener();
-	});
-});
+    // Manual trigger (e.g., <a href="#cloudie">)
+    document.querySelectorAll('a[href="#cloudie"]').forEach(trigger => {
+      trigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        setTimeout(() => initSaveChat(), 300);
+      });
+    });
+
+    // Reinitialize on chat reopen
+    document.addEventListener("chatReinitialize", () => {
+      console.log("chatSave.js: Reinitializing save functionality due to chat reopen...");
+      initSaveChat();
+    });
+  });
+})();

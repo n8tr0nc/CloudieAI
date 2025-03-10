@@ -1,129 +1,220 @@
-document.addEventListener('DOMContentLoaded', () => {
-  console.log("chatPersist.js: DOM fully loaded.");
+// chatMain.js
+(() => {
+  "use strict";
 
-  if (typeof jQuery === 'undefined') {
-    console.error("chatPersist.js: jQuery is required but not found. Script will not run.");
-    return;
+  // Constants
+  const API_ENDPOINT = "https://synthwave.app.n8n.cloud/webhook/4e3aa23d-ac0b-4967-b32a-ab34a8c1e2b7/chat";
+  const HISTORY_KEY = "chatHistory";
+  const HISTORY_EXPIRATION = 7 * 24 * 60 * 60 * 1000; // 7 days
+  const MAX_HISTORY_SIZE = 100;
+  const POPUP_ID = "12698"; // Elementor popup ID
+
+  // Format links with target="_blank" for external URLs
+  function formatLinks(html) {
+    try {
+      return html.replace(/<a\s+([^>]+)>/gi, (match, attrs) => {
+        const hrefMatch = attrs.match(/href=["']([^"']+)["']/i);
+        if (!hrefMatch) return match;
+        const href = hrefMatch[1].toLowerCase();
+        const isInternal = href.includes("cloudie.so") || /^(\/|\.\/|\.\.\/)/.test(href) || (!/^(mailto:|:\/\/)/.test(href));
+        return isInternal ? match : /target\s*=\s*["']_blank["']/i.test(attrs) ? match : `<a ${attrs} target="_blank" rel="noopener">`;
+      });
+    } catch (error) {
+      console.error("chatMain.js: Error formatting links:", error);
+      return html;
+    }
   }
 
-  jQuery(document).ready(function($) {
-    const popupId = 12698;
-    const MAX_RETRIES = 50;
-    let retryCount = 0;
-
-    // Debounce utility
-    function debounce(func, wait) {
-      let timeout;
-      return function (...args) {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this, args), wait);
-      };
-    }
-
-    // Wait for Elementor Pro with retry limit
-    function waitForElementorPro(callback) {
-      if (typeof elementorProFrontend !== 'undefined' &&
-          typeof elementorProFrontend.modules !== 'undefined' &&
-          typeof elementorProFrontend.modules.popup !== 'undefined') {
-        console.log("chatPersist.js: Elementor Pro detected.");
-        callback();
-      } else if (retryCount < MAX_RETRIES) {
-        retryCount++;
-        console.log(`chatPersist.js: Waiting for Elementor Pro (attempt ${retryCount}/${MAX_RETRIES})...`);
-        setTimeout(() => waitForElementorPro(callback), 100);
-      } else {
-        console.error("chatPersist.js: Elementor Pro not detected after max retries. Using fallback.");
-        callback(true);
+  // Load history from localStorage
+  function loadChatHistory() {
+    const stored = localStorage.getItem(HISTORY_KEY);
+    if (!stored) return [];
+    try {
+      const { timestamp, messages } = JSON.parse(stored);
+      if (Date.now() - timestamp > HISTORY_EXPIRATION) {
+        localStorage.removeItem(HISTORY_KEY);
+        return [];
       }
+      console.log("chatMain.js: Loaded", messages.length, "messages from your previous chat...");
+      return messages.slice(-MAX_HISTORY_SIZE);
+    } catch (error) {
+      console.error("chatMain.js: Error loading history:", error);
+      localStorage.removeItem(HISTORY_KEY);
+      return [];
+    }
+  }
+
+  // Save history to localStorage
+  function saveChatHistory(messages) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify({
+        timestamp: Date.now(),
+        messages: messages.slice(-MAX_HISTORY_SIZE),
+      }));
+    } catch (error) {
+      console.error("chatMain.js: Error saving history:", error);
+    }
+  }
+
+  // Append message to chat log
+  function appendMessage(sender, text) {
+    const chatLog = document.getElementById("chat-log");
+    if (!chatLog) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("chat-text");
+    const bubble = document.createElement("div");
+    bubble.classList.add(sender === "user" ? "user-text" : "agent-text");
+    bubble.innerHTML = formatLinks(text.replace(/\*\*/g, "").replace(/(\r\n|\r|\n)/gm, "<br>"));
+    wrapper.appendChild(bubble);
+    chatLog.appendChild(wrapper);
+    chatLog.scrollTop = chatLog.scrollHeight; // Scroll to bottom
+
+    const history = loadChatHistory();
+    history.push({ sender, text });
+    saveChatHistory(history); // Save to localStorage
+  }
+
+  // Load history into chat log
+  function loadHistory(chatLog) {
+    const history = loadChatHistory();
+    if (!history.length) return;
+
+    chatLog.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+    history.forEach(({ sender, text }) => {
+      const wrapper = document.createElement("div");
+      wrapper.classList.add("chat-text");
+      const bubble = document.createElement("div");
+      bubble.classList.add(sender === "user" ? "user-text" : "agent-text");
+      bubble.innerHTML = formatLinks(text.replace(/\*\*/g, "").replace(/(\r\n|\r|\n)/gm, "<br>"));
+      wrapper.appendChild(bubble);
+      fragment.appendChild(wrapper);
+    });
+    chatLog.appendChild(fragment);
+    chatLog.scrollTop = chatLog.scrollHeight; // Scroll to bottom
+  }
+
+  // Debounce utility
+  function debounce(func, wait) {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  }
+
+  // Initialize chat
+  function initChat() {
+    const chatForm = document.getElementById("chat-form");
+    const chatInput = document.getElementById("chat-input");
+    const chatLog = document.getElementById("chat-log");
+    const sendButton = document.getElementById("send-button");
+
+    if (!chatForm || !chatInput || !chatLog || !sendButton) {
+      console.error("chatMain.js: Missing chat elements:", { chatForm, chatInput, chatLog, sendButton });
+      return;
     }
 
-    // Show popup with reinitialization
-    function showPopup(isFallbackMode = false) {
+    loadHistory(chatLog);
+
+    if (chatForm.dataset.listenersAttached) return;
+
+    chatForm.dataset.listenersAttached = "true";
+
+    const sendMessage = async () => {
+      const userMessage = chatInput.value.trim();
+      if (!userMessage) return;
+
+      chatInput.disabled = true;
+      appendMessage("user", userMessage);
+      chatInput.value = "";
+
+      const typingIndicator = document.createElement("div");
+      typingIndicator.classList.add("think-text");
+      typingIndicator.textContent = "Cloudie is thinking...";
+      chatLog.appendChild(typingIndicator);
+      chatLog.scrollTop = chatLog.scrollHeight; // Scroll to bottom
+
       try {
-        if (!isFallbackMode && elementorProFrontend?.modules?.popup?.showPopup) {
-          elementorProFrontend.modules.popup.showPopup({ id: popupId });
-        } else {
-          const $popup = $(`[data-elementor-id="${popupId}"]`);
-          if ($popup.length) {
-            $popup.show().addClass('elementor-popup-modal--active dialog-visible');
-            console.log("chatPersist.js: Fallback - Popup shown via jQuery.");
-          } else {
-            console.warn("chatPersist.js: Popup element not found for ID", popupId);
-            return;
-          }
-        }
-        sessionStorage.setItem('popupShown', 'true');
-        setTimeout(() => reinitializeChat(), 100);
+        const response = await fetch(API_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatInput: userMessage }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+        const data = await response.json();
+        typingIndicator.remove();
+        appendMessage("bot", data.response || data.output || "Sorry, no response received.");
       } catch (error) {
-        console.error("chatPersist.js: Error triggering popup:", error);
+        console.error("chatMain.js: Send error:", error);
+        typingIndicator.remove();
+        appendMessage("bot", `Sorry, something went wrong: ${error.message}`);
+      } finally {
+        chatInput.disabled = false;
       }
-    }
+    };
 
-    // Reinitialize chat UI with vanilla CustomEvent
-    function reinitializeChat() {
-      const chatContainer = document.getElementById('chat-container');
-      if (!chatContainer || chatContainer.offsetParent === null) {
-        console.warn("chatPersist.js: Chat container not visible yet, retrying...");
-        setTimeout(reinitializeChat, 100);
-        return;
+    const debouncedSendMessage = debounce(sendMessage, 300);
+
+    sendButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      debouncedSendMessage();
+    });
+
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      debouncedSendMessage();
+    });
+
+    // Close button handler - only set up when chat initializes
+    const closeButtons = document.querySelectorAll(".dialog-close-button");
+    if (closeButtons.length === 0) {
+      console.warn("chatMain.js: No close buttons (.dialog-close-button) found in popup.");
+    }
+    closeButtons.forEach((button) => {
+      if (!button.dataset.listenerAttached) {
+        button.addEventListener("click", () => {
+          console.log("chatMain.js: Cloudie deactivated...");
+          if (chatLog) {
+            chatLog.scrollTop = chatLog.scrollHeight; // Silent scroll restore
+          }
+        });
+        button.dataset.listenerAttached = "true";
       }
-      const reinitializeEvent = new CustomEvent('chatReinitialize');
-      document.dispatchEvent(reinitializeEvent);
-      console.log("chatPersist.js: Dispatched chatReinitialize event.");
-    }
+    });
+  }
 
-    // Check popup state
-    function checkPopupState(isFallbackMode = false) {
-      if (sessionStorage.getItem('popupClosed') !== 'true' &&
-          (window.location.hash === '#cloudie' || sessionStorage.getItem('popupShown') === 'true')) {
-        showPopup(isFallbackMode);
-      }
-    }
+  // Trigger setup
+  document.addEventListener("DOMContentLoaded", () => {
+    console.log("chatMain.js: DOM loaded, awaiting your command...");
 
-    const debouncedCheckPopupState = debounce(checkPopupState, 200);
-
-    // Handle link clicks to open popup
-    function attachLinkListener() {
-      const $links = $('a[href="#cloudie"]');
-      if ($links.length === 0) console.warn("chatPersist.js: No links with href='#cloudie' found.");
-      $links.off('click.cloudie').on('click.cloudie', function(e) {
+    // Manual trigger (e.g., <a href="#cloudie">)
+    document.querySelectorAll('a[href="#cloudie"]').forEach(trigger => {
+      trigger.addEventListener("click", (e) => {
         e.preventDefault();
-        showPopup();
-        sessionStorage.removeItem('popupClosed');
-      });
-    }
-
-    // Handle popup hide
-    $(document).off('elementor/popup/hide.cloudie').on('elementor/popup/hide.cloudie', function(event, id) {
-      if (id === popupId) {
-        sessionStorage.setItem('popupClosed', 'true');
-        sessionStorage.removeItem('popupShown');
-        if (window.location.hash === '#cloudie') {
-          history.replaceState(null, null, window.location.pathname);
-          console.log("chatPersist.js: Removed #cloudie from URL.");
+        console.log("chatMain.js: Cloudie activated...");
+        if (typeof elementorProFrontend?.modules?.popup?.showPopup === "function") {
+          elementorProFrontend.modules.popup.showPopup({ id: POPUP_ID });
         }
+        setTimeout(() => initChat(), 300); // Delay for popup render
+      });
+    });
+
+    // Elementor popup show event
+    document.addEventListener("elementor/popup/show", (event) => {
+      const { popupId } = event.detail || {};
+      if (popupId === POPUP_ID) {
+        console.log("chatMain.js: Elementor popup shown...");
+        setTimeout(() => initChat(), 300); // Delay for popup render
       }
     });
 
-    // Preserve popup state on navigation
-    function attachNavigationListener() {
-      const $navLinks = $('a:not([href="#cloudie"])');
-      if ($navLinks.length === 0) console.warn("chatPersist.js: No navigation links found.");
-      $navLinks.off('click.cloudie').on('click.cloudie', function(e) {
-        if (sessionStorage.getItem('popupShown') === 'true' && !this.href.includes('#')) {
-          e.preventDefault();
-          window.location.href = this.href + '#cloudie';
-        }
-      });
-    }
-
-    // Initialize
-    waitForElementorPro((isFallbackMode) => {
-      attachLinkListener();
-      attachNavigationListener();
-      checkPopupState(isFallbackMode);
-      $(window).off('hashchange.cloudie').on('hashchange.cloudie', () => debouncedCheckPopupState(isFallbackMode));
-      console.log("chatPersist.js: Initialization complete.");
+    // Custom reinitialize event
+    document.addEventListener("chatReinitialize", () => {
+      console.log("chatMain.js: Reinitializing chat...");
+      initChat();
     });
   });
-});
+})();

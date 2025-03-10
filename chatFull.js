@@ -1,37 +1,41 @@
-document.addEventListener('DOMContentLoaded', () => {
-  console.log("chatFull.js: DOM fully loaded.");
+// chatFull.js
+(() => {
+  "use strict";
 
-  let forceFullScreen = window.location.search.includes('fullscreen=1');
-  const FULL_CHAT_CLASS = 'full-chat';
+  // Constants
+  const FULL_CHAT_CLASS = "full-chat";
+  const POPUP_ID = "12698"; // Elementor popup ID
 
-  // Debounce utility to limit rapid toggle calls
+  // Debounce utility
   function debounce(func, wait) {
     let timeout;
-    return function (...args) {
+    return (...args) => {
       clearTimeout(timeout);
-      timeout = setTimeout(() => func.apply(this, args), wait);
+      timeout = setTimeout(() => func(...args), wait);
     };
   }
 
-  // Toggle full chat mode with state management
+  // Toggle full chat mode
   function toggleFullChat(e) {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
 
     const body = document.body;
     const docEl = document.documentElement;
     const isFullChat = body.classList.contains(FULL_CHAT_CLASS);
 
-    requestAnimationFrame(() => {
-      body.classList.toggle(FULL_CHAT_CLASS);
-      if (!isFullChat) {
-        docEl.style.overflow = 'hidden';
-        body.style.overflow = 'hidden';
-      } else {
-        docEl.style.overflow = '';
-        body.style.overflow = '';
+    body.classList.toggle(FULL_CHAT_CLASS);
+    if (!isFullChat) {
+      docEl.style.overflow = "hidden";
+      body.style.overflow = "hidden";
+    } else {
+      docEl.style.overflow = "";
+      body.style.overflow = "";
+      const chatLog = document.getElementById("chat-log");
+      if (chatLog) {
+        chatLog.scrollTop = chatLog.scrollHeight; // Silent scroll restore
       }
-      console.log(`chatFull.js: Full chat ${isFullChat ? 'disabled' : 'enabled'}`);
-    });
+    }
+    console.log(`chatFull.js: Full chat ${isFullChat ? "disabled..." : "enabled..."}`);
   }
 
   // Force open full chat if not already open
@@ -42,58 +46,75 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Attach event listeners with safeguards
+  // Attach event listeners
   function attachListeners() {
-    const fullChatIcon = document.getElementById('fullChat');
-    if (fullChatIcon && !fullChatIcon.dataset.listenerAttached) {
-      fullChatIcon.addEventListener('click', debouncedToggleFullChat);
-      fullChatIcon.dataset.listenerAttached = 'true';
-      console.log("chatFull.js: Full chat icon listener attached.");
-    } else if (!fullChatIcon) {
+    const fullChatIcon = document.getElementById("fullChat");
+    if (fullChatIcon) {
+      if (!fullChatIcon.dataset.listenerAttached) {
+        fullChatIcon.addEventListener("click", debouncedToggleFullChat);
+        fullChatIcon.dataset.listenerAttached = "true";
+        console.log("chatFull.js: Full chat listener active...");
+      }
+    } else {
       console.warn("chatFull.js: Full chat icon (#fullChat) not found.");
     }
 
-    const closeButtons = document.querySelectorAll('.dialog-close-button');
+    const closeButtons = document.querySelectorAll(".dialog-close-button");
     if (closeButtons.length === 0) {
       console.warn("chatFull.js: No close buttons (.dialog-close-button) found.");
     }
 
     closeButtons.forEach((button) => {
       if (!button.dataset.listenerAttached) {
-        button.addEventListener('click', () => {
-          requestAnimationFrame(() => {
-            document.body.classList.remove(FULL_CHAT_CLASS);
-            document.documentElement.style.overflow = '';
-            document.body.style.overflow = '';
-            console.log("chatFull.js: Full chat closed via close button.");
-          });
+        button.addEventListener("click", () => {
+          document.body.classList.remove(FULL_CHAT_CLASS);
+          document.documentElement.style.overflow = "";
+          document.body.style.overflow = "";
+          const chatLog = document.getElementById("chat-log");
+          if (chatLog) {
+            chatLog.scrollTop = chatLog.scrollHeight; // Silent scroll restore
+          }
+          // No console.log here
         });
-        button.dataset.listenerAttached = 'true';
+        button.dataset.listenerAttached = "true";
       }
     });
+
+    // Check URL parameter for fullscreen
+    const forceFullScreen = window.location.search.includes("fullscreen=1");
+    if (forceFullScreen) {
+      forceOpenFullChat();
+    }
   }
 
   // Debounced toggle function
-  const debouncedToggleFullChat = debounce(toggleFullChat, 200); // 200ms debounce
+  const debouncedToggleFullChat = debounce(toggleFullChat, 200);
 
-  // Initialize with MutationObserver
-  const observer = new MutationObserver((mutations, obs) => {
-    const chatContainer = document.getElementById('chat-container');
-    if (chatContainer && chatContainer.offsetParent !== null) {
-      attachListeners();
-      if (forceFullScreen) {
-        forceOpenFullChat();
-        forceFullScreen = false;
+  // Trigger setup
+  document.addEventListener("DOMContentLoaded", () => {
+    // Manual trigger (e.g., <a href="#cloudie">)
+    document.querySelectorAll('a[href="#cloudie"]').forEach(trigger => {
+      trigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (typeof elementorProFrontend?.modules?.popup?.showPopup === "function") {
+          elementorProFrontend.modules.popup.showPopup({ id: POPUP_ID });
+        }
+        setTimeout(() => attachListeners(), 300); // Matches chatMain.js delay
+      });
+    });
+
+    // Elementor popup event
+    document.addEventListener("elementor/popup/show", (event) => {
+      const { popupId } = event.detail || {};
+      if (popupId === POPUP_ID) {
+        setTimeout(() => attachListeners(), 300); // Matches chatMain.js delay
       }
-      obs.disconnect(); // Stop observing after initialization
-      console.log("chatFull.js: Observer disconnected after initialization.");
-    }
-  });
+    });
 
-  observer.observe(document.body, { childList: true, subtree: true });
-	
-	document.addEventListener('chatReinitialize', () => {
-		console.log("chatFull.js: Reattaching listeners due to popup reopen.");
-		attachListeners();
-	});
-});
+    // Custom reinitialize event
+    document.addEventListener("chatReinitialize", () => {
+      console.log("chatFull.js: Reinitializing full chat...");
+      attachListeners();
+    });
+  });
+})();

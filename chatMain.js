@@ -9,20 +9,35 @@
   const MAX_HISTORY_SIZE = 100;
   const POPUP_ID = "12698"; // Elementor popup ID
 
-  // Format links with target="_blank" for external URLs
+  // Format links to ensure external ones open in new tabs
   function formatLinks(html) {
     try {
-      return html.replace(/<a\s+([^>]+)>/gi, (match, attrs) => {
-        const hrefMatch = attrs.match(/href=["']([^"']+)["']/i);
-        if (!hrefMatch) return match;
-        const href = hrefMatch[1].toLowerCase();
-        const isInternal = href.includes("cloudie.so") || /^(\/|\.\/|\.\.\/)/.test(href) || (!/^(mailto:|:\/\/)/.test(href));
-        return isInternal ? match : /target\s*=\s*["']_blank["']/i.test(attrs) ? match : `<a ${attrs} target="_blank" rel="noopener">`;
+      return html.replace(/<a\s+href=["']([^"']+)["']([^>]*)>/gi, (match, href, rest) => {
+        const isInternal = href.toLowerCase().includes("cloudie.so");
+        const hasTarget = /target\s*=\s*["']_blank["']/i.test(rest);
+        const targetAttr = isInternal || hasTarget ? "" : ' target="_blank" rel="noopener"';
+        return `<a href="${href}"${targetAttr}${rest}>`;
       });
     } catch (error) {
       console.error("chatMain.js: Error formatting links:", error);
       return html;
     }
+  }
+
+  // Parse Markdown links into clickable <a> tags, using the URL as the link text
+  function parseMarkdownLinks(text) {
+    console.log("chatMain.js: Raw text before parsing:", text); // Debug log
+    // Handle Markdown links: [text](url) - use the URL as the clickable text
+    const markdownPattern = /\[([^\]]+)\]\((https?:\/\/[^\s<)]+)\)/gi;
+    text = text.replace(markdownPattern, (match, linkText, url) => {
+      console.log("chatMain.js: Found Markdown link - Text:", linkText, "URL:", url); // Debug log
+      return `<a href="${url}">${url}</a>`;
+    });
+
+    // Replace newlines with <br> tags and remove bold ** markers
+    text = text.replace(/\*\*/g, "").replace(/(\r\n|\r|\n)/gm, "<br>");
+    console.log("chatMain.js: Text after parsing:", text); // Debug log
+    return text;
   }
 
   // Load history from localStorage
@@ -65,7 +80,8 @@
     wrapper.classList.add("chat-text");
     const bubble = document.createElement("div");
     bubble.classList.add(sender === "user" ? "user-text" : "agent-text");
-    bubble.innerHTML = formatLinks(text.replace(/\*\*/g, "").replace(/(\r\n|\r|\n)/gm, "<br>"));
+    const processedText = formatLinks(parseMarkdownLinks(text));
+    bubble.innerHTML = processedText;
     wrapper.appendChild(bubble);
     chatLog.appendChild(wrapper);
     chatLog.scrollTop = chatLog.scrollHeight; // Scroll to bottom
@@ -87,7 +103,8 @@
       wrapper.classList.add("chat-text");
       const bubble = document.createElement("div");
       bubble.classList.add(sender === "user" ? "user-text" : "agent-text");
-      bubble.innerHTML = formatLinks(text.replace(/\*\*/g, "").replace(/(\r\n|\r|\n)/gm, "<br>"));
+      const processedText = formatLinks(parseMarkdownLinks(text));
+      bubble.innerHTML = processedText;
       wrapper.appendChild(bubble);
       fragment.appendChild(wrapper);
     });
@@ -153,6 +170,7 @@
         appendMessage("bot", `Sorry, something went wrong: ${error.message}`);
       } finally {
         chatInput.disabled = false;
+        chatInput.focus(); // Set focus back to the input after the response
       }
     };
 
